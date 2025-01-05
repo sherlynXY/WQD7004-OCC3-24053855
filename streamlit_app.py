@@ -1,151 +1,158 @@
 import streamlit as st
 import pandas as pd
-import math
 from pathlib import Path
 
 # Set the title and favicon that appear in the Browser's tab bar.
 st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
+    page_title='WQD7004 Alternative Assessment 1',
+    page_icon=':airplane:',  # This is an emoji shortcode. Could be a URL too.
 )
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------
 # Declare some useful functions.
 
 @st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+def get_data():
+    """Load and preprocess data from CSV files."""
+    # Load data
+    arrivals_file = Path(__file__).parent / 'data/foreign_arrivals.csv'
+    poe_file = Path(__file__).parent / 'data/poe.csv'
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
+    foreign_arrival_df = pd.read_csv(arrivals_file)
+    poe_df = pd.read_csv(poe_file)
 
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
+    # Preprocess data
+    foreign_arrival_df['date'] = pd.to_datetime(foreign_arrival_df['date'])
+    foreign_arrival_df['year'] = foreign_arrival_df['date'].dt.year
 
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
+    # Merge dataframes
+    merged_df = foreign_arrival_df.merge(poe_df, on='poe', how='left')
 
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
+    return merged_df
 
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
+# Load data
+data_df = get_data()
 
-    return gdp_df
+# Debugging: View dataset columns and sample
+# st.write("Merged DataFrame Sample:", data_df.head())
+# st.write("Merged DataFrame Columns:", data_df.columns)
 
-gdp_df = get_gdp_data()
-
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------
 # Draw the actual page
 
 # Set the title that appears at the top of the page.
 '''
-# :earth_americas: GDP dashboard
+# :airplane: Foreign Arrivals Dashboard
 
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
+Explore data on foreign arrivals by point of entry (POE) and country.
 '''
 
-# Add some spacing
-''
-''
-
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
+# Year range slider (set default to the entire available range)
+min_year = data_df['year'].min()
+max_year = data_df['year'].max()
 
 from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
+    'Select the year range:',
+    min_value=min_year,
+    max_value=max_year,
+    value=[min_year, max_year]  # Default to full range
 )
 
-''
-''
+# Country and POE selection with "Select All" option
+countries = data_df['country'].unique().tolist()
+poes = data_df['poe'].unique().tolist()
+
+# Add "Select All" option to countries and POEs
+countries.insert(0, 'Select All')
+poes.insert(0, 'Select All')
+
+# Country filter
+selected_countries = st.multiselect(
+    'Select countries:',
+    countries,
+    default=countries[1:]  # By default, all countries are selected (except "Select All")
+)
+
+# POE filter
+selected_poes = st.multiselect(
+    'Select points of entry (POE):',
+    poes,
+    default=poes[1:]  # By default, all POEs are selected (except "Select All")
+)
+
+# Handle "Select All" logic
+if 'Select All' in selected_countries:
+    selected_countries = countries[1:]  # Exclude "Select All" option
+if 'Select All' in selected_poes:
+    selected_poes = poes[1:]  # Exclude "Select All" option
+
+# Filter the data based on selections
+filtered_data_df = data_df[
+    (data_df['country'].isin(selected_countries)) &
+    (data_df['poe'].isin(selected_poes)) &
+    (data_df['year'] >= from_year) &
+    (data_df['year'] <= to_year)
+]
+
+# Display key metrics: Total Arrivals
+st.header(f'Total Arrivals in {to_year}', divider='gray')
+
+# Filter data for the selected year and selected countries/POEs
+filtered_data_for_year = filtered_data_df[filtered_data_df['year'] == to_year]
+
+# Group the filtered data by country and sum the arrivals
+summary = filtered_data_for_year.groupby('country')['arrivals'].sum()
+
+# Check if there is no data available for the selected year
+if summary.empty:
+    st.write("No data available for the selected year and filters.")
+else:
+    # Display the summary as individual metrics
+    cols = st.columns(min(len(summary), 4))  # Limit number of columns to 4 for readability
+
+    for i, (country, total) in enumerate(summary.items()):
+        with cols[i % len(cols)]:  # Distribute metrics across available columns
+            st.metric(
+                label=f'{country} Total Arrivals',
+                value=f'{total:,}'  # Format number with commas
+            )
 
 
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
+# Plotting arrival trends
+st.header('Arrivals Over Time', divider='gray')
 
-st.header(f'GDP in {to_year}', divider='gray')
+st.line_chart(
+    filtered_data_df.groupby(['year', 'country'])['arrivals'].sum().unstack(),
+    use_container_width=True
+)
 
-''
+# Map visualization
+st.header('Points of Entry Map', divider='gray')
 
-cols = st.columns(4)
+# Rename 'long' to 'lon' for compatibility with st.map
+data_for_map = filtered_data_df[['lat', 'long']].dropna().drop_duplicates()
+data_for_map = data_for_map.rename(columns={'long': 'lon'})
 
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
+# Display the map
+st.map(data_for_map, zoom=5)
 
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
+# Additional visualizations
 
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
+# 1. Total Arrivals by POE and Country (Bar Chart)
+st.header('Total Arrivals by POE and Country', divider='gray')
 
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+# Group data for visualization (filtered by selected countries and POEs)
+total_arrivals_by_poe = filtered_data_df.groupby(['poe', 'country'])['arrivals'].sum().unstack()
+
+# Plot bar chart
+st.bar_chart(total_arrivals_by_poe, use_container_width=True)
+
+# 2. Monthly Arrival Distribution (Line Chart)
+st.header('Monthly Arrival Distribution', divider='gray')
+
+# Filter data to include selected year and countries
+filtered_data_df['month'] = filtered_data_df['date'].dt.month
+monthly_arrivals = filtered_data_df.groupby(['month', 'country'])['arrivals'].sum().unstack()
+
+# Plot monthly distribution
+st.line_chart(monthly_arrivals, use_container_width=True)
